@@ -832,7 +832,6 @@ function apertureFor(ctx,mode,maxAp){
 function shutterFor(ctx,mode){
   const cam=ctx.cam, ibis=cam.ibis||0;
   const fl=(ctx.focal||50)*(sensorOf(cam).crop);
-  const hh=ibis>0? Math.max(1/(fl*Math.pow(2,Math.min(ibis,5))),1/8) : 1/fl;
   const freeze=hasLook(ctx,"freeze"), blur=hasLook(ctx,"blur");
   if(ctx.cat==="星空") return mode==="quality"?25:15;
   if(isSlowSceneOnly(ctx)) return mode==="effect"? 4 : (mode==="quality"? 30: 2);
@@ -847,8 +846,10 @@ function shutterFor(ctx,mode){
   if(ctx.cat==="街头") return freeze?1/500:1/250;
   if(ctx.cat==="建筑") return mode==="quality"?2:1/60;
   if(ctx.cat==="风景") return mode==="quality"?2:1/125;
+  /* 夜景类：拍人（夜景人像/婚礼等）用安全快门；纯城市夜景/风光手持 1/60 */
+  if(ctx.cat==="夜景") return (ctx.sub&&ctx.sub.indexOf("人像")>=0)?1/125:1/60;
   if(mode==="quality"&&isStillScene(ctx)) return 2;
-  return Math.max(hh,1/60);
+  return 1/125;
 }
 function isSlowSceneOnly(ctx){
   return ["长曝光","瀑布","星轨","星空人像","烟花"].includes(ctx.sub);
@@ -1778,9 +1779,9 @@ function renderAbout(){
         <div class="log-body">
           <h4>快门合理性修复</h4>
           <ul>
-            <li>修复产品 / 静物在弱光常亮灯下「自然稳妥」被硬拖慢到 1/13s、手持会糊片的问题；改为保持手持安全快门（1/125），靠开大光圈 + 合理 ISO 解决欠曝。</li>
-            <li>重新区分三档策略：自然稳妥手持可用不糊片；只有「画质优先」才用三脚架慢门换低噪点；效果优先保持快门、接受较高 ISO。</li>
-            <li>修正三脚架建议：自然稳妥的产品 / 微距不再误报三脚架，只有画质优先与明确慢门场景才提示。</li>
+            <li>修复手持安全快门公式写反导致夜景类场景被默认给 1/8s 的问题；夜景人像改为 1/125、纯城市夜景手持 1/60，不再糊片。</li>
+            <li>修复产品 / 静物在弱光常亮灯下「自然稳妥」被硬拖慢到 1/13s 的问题；保持手持安全快门，靠开大光圈 + 合理 ISO 解决欠曝。</li>
+            <li>重新区分三档策略：自然稳妥手持可用；只有「画质优先」才用三脚架慢门换低噪点；效果优先保持快门、接受较高 ISO。</li>
           </ul>
         </div>
       </div>
