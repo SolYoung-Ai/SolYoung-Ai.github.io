@@ -833,6 +833,13 @@ function shutterFor(ctx,mode){
   const cam=ctx.cam, ibis=cam.ibis||0;
   const fl=(ctx.focal||50)*(sensorOf(cam).crop);
   const freeze=hasLook(ctx,"freeze"), blur=hasLook(ctx,"blur");
+  /* 手持安全快门：按倒数法则随等效焦段，再用 IBIS 放宽；人物动态至少 1/125 */
+  const hh=()=>{
+    const base=1/fl;                       /* 无防抖最慢安全时长（秒） */
+    const withIbis=base*Math.pow(2,Math.min(ibis,5));
+    const maxDur=Math.min(withIbis, 1/125); /* 拍人不慢于 1/125 */
+    return 1/maxDur;
+  };
   if(ctx.cat==="星空") return mode==="quality"?25:15;
   if(isSlowSceneOnly(ctx)) return mode==="effect"? 4 : (mode==="quality"? 30: 2);
   if(blur) return mode==="effect"?1/8:1/4;
@@ -841,15 +848,16 @@ function shutterFor(ctx,mode){
   if(ctx.cat==="舞台"||ctx.cat==="活动") return 1/250;
   if(ctx.cat==="宠物") return freeze?1/500:1/250;
   if(ctx.cat==="视频") return 1/(2*(ctx.fps||30));
-  if(ctx.cat==="人像"||ctx.cat==="婚礼"||ctx.cat==="旅行") return freeze?1/500:1/125;
+  if(ctx.cat==="人像"||ctx.cat==="婚礼"||ctx.cat==="旅行") return freeze?1/500:hh();
+  /* 产品/食物/微距：手持固定 1/125，不靠 IBIS 慢门（微距/产品手抖明显） */
   if(ctx.cat==="产品"||ctx.cat==="食物"||ctx.cat==="微距") return freeze?1/250:1/125;
   if(ctx.cat==="街头") return freeze?1/500:1/250;
   if(ctx.cat==="建筑") return mode==="quality"?2:1/60;
   if(ctx.cat==="风景") return mode==="quality"?2:1/125;
-  /* 夜景类：拍人（夜景人像/婚礼等）用安全快门；纯城市夜景/风光手持 1/60 */
-  if(ctx.cat==="夜景") return (ctx.sub&&ctx.sub.indexOf("人像")>=0)?1/125:1/60;
+  /* 夜景类：拍人用安全快门；纯城市夜景手持 1/60 */
+  if(ctx.cat==="夜景") return (ctx.sub&&ctx.sub.indexOf("人像")>=0)?hh():1/60;
   if(mode==="quality"&&isStillScene(ctx)) return 2;
-  return 1/125;
+  return hh();
 }
 function isSlowSceneOnly(ctx){
   return ["长曝光","瀑布","星轨","星空人像","烟花"].includes(ctx.sub);
@@ -898,7 +906,47 @@ function computePlan(ctx,mode){
     t=syncT;
     iso=Math.max(base, Math.min(base*4, iso));
   }
-  return {ap,t,iso,range:[lo,hi]};
+  return sanityCheck({ap,t,iso,range:[lo,hi]},ctx,mode);
+}
+
+/* ===== 输出前自校验层：纠正明显违反摄影常识的参数，不把错的推给用户 ===== */
+function sanityCheck(plan,ctx,mode){
+  const cam=ctx.cam; let {ap,t,iso}=plan; const warns=[];
+  const maxAp=lensMaxAp(ctx.lens)||fixedAp(cam)||1.8;
+  const base=cam.iso[0], maxIso=cam.iso[1]||25600;
+  const fl=(ctx.focal||50)*(sensorOf(cam).crop);
+  const slowSubs=["长曝光","瀑布","星轨","星空人像","烟花","银河","星空","城市夜景","建筑夜景","蓝调时刻"];
+  const isSlow=slowSubs.includes(ctx.sub)||hasLook(ctx,"blur")||ctx.cat==="星空";
+  /* 1. 光圈不小于镜头最大光圈 */
+  if(ap<maxAp-0.01){ ap=maxAp; warns.push("光圈已收到镜头最大光圈"); }
+  /* 2. ISO 钳制在相机原生范围内 */
+  iso=Math.max(base, Math.min(maxIso, iso));
+  /* 3. 闪灯：快门不得超过同步速度 */
+  if(ctx.flash&&ctx.flash.id!=="none"&&ctx.cat!=="视频"){
+    const sync=camSync(cam)||(1/160);
+    if(t>sync+1e-5){ t=sync; warns.push("快门已收到闪灯同步速度"); }
+  }
+  /* 4. 手持糊片保护：非三脚架/非慢门场景，快门不得慢于倒数法则 */
+  const needTripod = mode==="quality"&&["产品","微距","风景","建筑"].includes(ctx.cat);
+  if(!isSlow&&!needTripod&&ctx.cat!=="视频"){
+    const ibis=cam.ibis||0;
+    const maxDur=(1/fl)*Math.pow(2,Math.min(ibis,5));
+    const people=["人像","婚礼","活动"].includes(ctx.cat)||(ctx.sub&&ctx.sub.indexOf("人像")>=0);
+    const still=["产品","食物","微距"].includes(ctx.cat);
+    const floor=still?1/125:(people?Math.min(maxDur,1/125):maxDur);
+    if(t>floor+1e-5){
+      /* 提 ISO 把快门拉回安全线，而不是慢门糊片 */
+      const needIso=isoFor(ap,floor,ctx.ev);
+      iso=Math.round(Math.max(iso, Math.min(maxIso, needIso)));
+      t=floor;
+      warns.push("快门已按手持安全速度调整");
+    }
+  }
+  /* 5. 数值兜底 */
+  if(!isFinite(ap)||!isFinite(t)||!isFinite(iso)){
+    ap=maxAp; t=1/125; iso=base; warns.push("参数已重置为安全默认");
+  }
+  return {ap:round2(ap),t,iso,range:[Math.max(base,Math.round(iso/2)),Math.min(maxIso,Math.round(iso*2))],warns};
 }
 
 /* ===== DOF ENGINE ===== */
@@ -1040,7 +1088,7 @@ function buildAllPlans(store, expert){
     if(expert){
       if(expert.ap) ctx.looks=Object.assign([],ctx.looks).concat(expert.shallow?[]:[]);
     }
-    const {ap,t,iso,range}=computePlan(ctx,key);
+    const {ap,t,iso,range,warns}=computePlan(ctx,key);
     const sensor=sensorOf(cam);
     const dof=dofEngine(ap,ctx.focal||50,dist,coc);
     const flash=flashInfo(ctx,ap,iso,t);
@@ -1056,7 +1104,7 @@ function buildAllPlans(store, expert){
       focus, meter, file:"RAW", flash, tripod, dof, dist, vid, nd:vid&&vid.nd,
       conditions: condText(store.env, tmpl),
       why:{aperture:wa, shutter:ws, iso:wi},
-      checklist: checklist(ctx)
+      checklist: checklist(ctx), warns: warns||[]
     };
     if(vid){ const vMaxAp=lensMaxAp(ctx.lens)||1.8; plan.aperture=Math.max(vid.ap, vMaxAp); plan.shutter=vid.t; plan.iso=vid.iso; plan.isoRange=[Math.max(cam.iso[0],Math.round(vid.iso/2)),Math.min(cam.iso[1]||25600,Math.round(vid.iso*2))]; }
     plans.push(plan);
@@ -1545,6 +1593,7 @@ function renderResultView(){
 
     ${p.flash? lightDiagram(p) : ""}
 
+    ${(p.warns&&p.warns.length)?`<div style="margin-top:22px;padding:12px 16px;border-radius:12px;background:var(--soft);font-size:13px;color:var(--sub)"><strong style="color:var(--ink)">已自动校正：</strong>${p.warns.join("；")}</div>`:""}
     <div style="margin-top:34px">
       <h3 style="margin-bottom:4px">现场不对？</h3>
       <p style="color:var(--sub);font-size:14px;margin-bottom:4px">告诉系统你遇到的情况，我们给出调整建议。</p>
@@ -1777,11 +1826,11 @@ function renderAbout(){
       <div class="log-item">
         <div class="log-date">2026 / 10 / 11</div>
         <div class="log-body">
-          <h4>快门合理性修复</h4>
+          <h4>参数自校验层 + 长焦手持修复</h4>
           <ul>
-            <li>修复手持安全快门公式写反导致夜景类场景被默认给 1/8s 的问题；夜景人像改为 1/125、纯城市夜景手持 1/60，不再糊片。</li>
-            <li>修复产品 / 静物在弱光常亮灯下「自然稳妥」被硬拖慢到 1/13s 的问题；保持手持安全快门，靠开大光圈 + 合理 ISO 解决欠曝。</li>
-            <li>重新区分三档策略：自然稳妥手持可用；只有「画质优先」才用三脚架慢门换低噪点；效果优先保持快门、接受较高 ISO。</li>
+            <li>新增引擎输出前自校验：光圈不越镜头最大、ISO 钳制原生范围、闪灯快门锁同步速度、手持场景快门不得慢于倒数法则（随实际焦段×IBIS 计算），有自动校正会在结果页提示。</li>
+            <li>修复无防抖机身（如 ZV-E10）配长焦仍给 1/125 的糊片问题；产品/食物/微距手持固定 1/125。</li>
+            <li>夜景人像改为 1/125 安全快门，不再出现 1/8s 糊片。</li>
           </ul>
         </div>
       </div>
