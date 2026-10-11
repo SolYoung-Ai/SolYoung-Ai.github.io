@@ -864,19 +864,23 @@ function computePlan(ctx,mode){
   let t=shutterFor(ctx,mode);
   const isoCap = mode==="effect"? maxIso : (mode==="quality"? base*4 : 3200);
   const still=isStillScene(ctx);
-  /* 静物/三脚架场景不允许为快门把 ISO 拉到极限，过暗就慢门 */
-  const effCap = (still && !hasLook(ctx,"freeze")) ? Math.min(isoCap,800) : isoCap;
+  /* 画质优先：静物允许三脚架慢门换低噪点；自然/效果模式不开慢门，保持手持安全快门 */
+  const tripodSlow = still && mode==="quality";
   const maxShutter=parseShutter(cam.shutter);
   let iso=isoFor(ap,t,ctx.ev);
-  if(iso>effCap){
-    // 太暗：优先压慢快门（主体静止），否则开大光圈
-    if(still){
-      const needT=ap*ap/Math.pow(2, ctx.ev+Math.log2(effCap/100));
+  if(iso>isoCap){
+    // 太暗
+    if(tripodSlow){
+      // 画质优先 + 静物：三脚架慢门压 ISO
+      const needT=ap*ap/Math.pow(2, ctx.ev+Math.log2(isoCap/100));
       if(needT<=60) t=Math.max(needT, maxShutter);
-    } else if(ap>maxAp/1.15){ ap=round2(Math.max(ap/Math.SQRT2,maxAp)); }
+    } else {
+      // 手持模式：先开大光圈，快门不动，宁可 ISO 高也不糊片
+      if(ap>maxAp/1.15){ ap=round2(Math.max(ap/Math.SQRT2,maxAp)); }
+    }
     iso=isoFor(ap,t,ctx.ev);
-    if(iso>effCap && ap>maxAp/1.15){ ap=round2(Math.max(ap/Math.SQRT2,maxAp)); iso=isoFor(ap,t,ctx.ev); }
-    iso=Math.min(iso,effCap);
+    if(iso>isoCap && ap>maxAp/1.15){ ap=round2(Math.max(ap/Math.SQRT2,maxAp)); iso=isoFor(ap,t,ctx.ev); }
+    iso=Math.min(iso,isoCap);
   } else if(iso<base){
     // 太亮：提高快门直到基准 ISO
     const needT=ap*ap/Math.pow(2, ctx.ev+Math.log2(base/100));
@@ -985,8 +989,9 @@ function meteringSuggestion(ctx,answers){
 }
 function tripodSuggestion(ctx,mode){
   if(ctx.cat==="星空"||ctx.cat==="视频"&&ctx.sub==="慢动作") return true;
-  if(isStillScene(ctx)) return true;
-  if(mode==="quality"&&["风景","建筑","产品","微距"].includes(ctx.cat)) return true;
+  if(isSlowSceneOnly(ctx)) return true;
+  /* 画质优先的产品/微距才用三脚架慢门；自然稳妥手持即可 */
+  if(mode==="quality"&&["产品","微距","风景","建筑"].includes(ctx.cat)) return true;
   return false;
 }
 function checklist(ctx){
@@ -1768,6 +1773,17 @@ function renderAbout(){
     <h3 style="margin-top:64px;letter-spacing:-.01em">更新日志</h3>
     <p style="color:var(--sub);font-size:14px;margin-top:8px">每一次迭代都记录在这里。</p>
     <div class="changelog">
+      <div class="log-item">
+        <div class="log-date">2026 / 10 / 11</div>
+        <div class="log-body">
+          <h4>快门合理性修复</h4>
+          <ul>
+            <li>修复产品 / 静物在弱光常亮灯下「自然稳妥」被硬拖慢到 1/13s、手持会糊片的问题；改为保持手持安全快门（1/125），靠开大光圈 + 合理 ISO 解决欠曝。</li>
+            <li>重新区分三档策略：自然稳妥手持可用不糊片；只有「画质优先」才用三脚架慢门换低噪点；效果优先保持快门、接受较高 ISO。</li>
+            <li>修正三脚架建议：自然稳妥的产品 / 微距不再误报三脚架，只有画质优先与明确慢门场景才提示。</li>
+          </ul>
+        </div>
+      </div>
       <div class="log-item">
         <div class="log-date">2026 / 10 / 04</div>
         <div class="log-body">
