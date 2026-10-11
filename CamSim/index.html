@@ -513,6 +513,17 @@ const CAMERAS = [
  {id:"k3iii", brand:"Pentax", model:"K-3 III", mount:"K", ss:"APS", mp:26, iso:[100,102400], sync:1/180, ibis:5.5, shutter:"1/8000", exp:204800, eye:false, det:"人物/动物", video:"4K60", weight:735, raw:"RAW/PEF"},
  {id:"x2d", brand:"Hasselblad", model:"X2D 100C", mount:"XCD", ss:"GFX", mp:100, iso:[64,25600], sync:"1/2000", ibis:0, shutter:"1/4000", exp:102400, eye:false, det:"人物", video:"4K30", weight:895, raw:"RAW/3FR"}
 ];
+/* 国内常用叫法（A7M4 / A7R5 / R6二代 等），显示在型号旁，并纳入搜索 */
+const CAM_CN={
+ a7iv:"A7M4",a7rv:"A7R5",a7cii:"A7C2",a1ii:"A1M2",a7siii:"A7S3",
+ a7iii:"A7M3",a7riv:"A7R4",a7ii:"A7M2",a7c:"A7C",a7cr:"A7CR",a1:"A1",a9iii:"A9M3",
+ zve10:"ZV-E10",zve1:"ZV-E1",fx3:"FX3",fx30:"FX30",fx6:"FX6",fx9:"FX9",
+ r6ii:"R6二代",r5ii:"R5二代",r5:"R5",r6:"R6",r8:"R8",r3:"R3",r50:"R50",r7:"R7",r10:"R10",rp:"RP",
+ z6iii:"Z6III",z6ii:"Z6II",z7ii:"Z7II",z8:"Z8",z9:"Z9",zf:"Zf",z5:"Z5",z50:"Z50",zfc:"Zfc",z30:"Z30",
+ xt5:"X-T5",xt30ii:"X-T30二代",x100vi:"X100VI",gfx100sii:"GFX100S二代",xs20:"X-S20",xh2:"X-H2",xh2s:"X-H2S",xs10:"X-S10",
+ s5ii:"S5II",q3:"Q3",k3iii:"K3三代",x2d:"X2D"
+};
+function camCN(c){ return CAM_CN[c.id]||""; }
 const LENSES = [
  {id:"fe35", brand:"Sony", model:"FE 35mm F1.8", mount:"E", fl:35, ap:1.8, stab:false, mfd:0.22, macro:0.18},
  {id:"fe50", brand:"Sony", model:"FE 50mm F1.8", mount:"E", fl:50, ap:1.8, stab:false, mfd:0.45, macro:0.15},
@@ -1408,7 +1419,7 @@ function stepCamera(){
   const q=(SIM.search||"").toLowerCase();
   const brands=["Sony","Canon","Nikon","Fujifilm","Panasonic","Leica","OM System","Sigma","Pentax","Hasselblad"];
   let list=CAMERAS;
-  if(q) list=list.filter(c=>(c.brand+" "+c.model+" "+c.id+" "+(c.alias||"")).toLowerCase().includes(q));
+  if(q) list=list.filter(c=>(c.brand+" "+c.model+" "+camCN(c)+" "+c.id+" "+(c.alias||"")).toLowerCase().includes(q));
   const grid=`
     <div class="sim-head"><h2>你用什么相机？</h2><p>搜索型号，或从热门品牌中选择。</p></div>
     <div class="search">${I.search}<input id="camSearch" value="${esc(SIM.search)}" placeholder="搜索相机型号，例如 A7 IV" aria-label="搜索相机"/></div>
@@ -1420,7 +1431,7 @@ function stepCamera(){
     <div class="grid c2">
       ${list.map(c=>`<div class="pick ${cam&&cam.id===c.id?"selected":""}" data-id="${c.id}">
         <span class="check">${I.check}</span>
-        <div class="pk-t">${c.brand} ${c.model}</div>
+        <div class="pk-t">${c.brand} ${c.model}${camCN(c)?` <span style="color:var(--sub);font-weight:500">· ${camCN(c)}</span>`:""}</div>
         <div class="pk-s">${SENSORS[c.ss].name} · ${c.mp}MP${c.fixed?" · "+c.fixed:""}</div>
         <div class="pk-b">IBIS ${c.ibis} 档${c.fixed?" · 内置镜头":""}</div>
       </div>`).join("")}
@@ -1759,7 +1770,7 @@ function renderLib(type){
   $$("#app .lib-filter button").forEach(b=>b.addEventListener("click",()=>{ LIB.brand=b.dataset.b==="全部"?"":b.dataset.b; renderLib(type); }));
 }
 function libCamCard(c){
-  return `<div class="card device-card" data-id="${c.id}"><div class="brand">${c.brand}</div><h4>${c.model}</h4>
+  return `<div class="card device-card" data-id="${c.id}"><div class="brand">${c.brand}</div><h4>${c.model}${camCN(c)?` <span style="font-weight:500;color:var(--sub);font-size:14px">· ${camCN(c)}</span>`:""}</h4>
     <div class="spec-row"><span>传感器</span><b>${SENSORS[c.ss].name} ${c.mp}MP</b></div>
     <div class="spec-row"><span>防抖 IBIS</span><b>${c.ibis} 档</b></div>
     <div class="spec-row"><span>闪光同步</span><b>${typeof c.sync==="string"?c.sync:"1/"+Math.round(1/c.sync)}</b></div>
